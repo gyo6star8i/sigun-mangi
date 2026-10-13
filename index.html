@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>시군만기 판정기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: 상단 설정띠 → 업로드 → 대상자 요약표 → 선택 교사 상세(판정 카드 · 근무 타임라인 · 제외기간 · 원본 경력) */
+:root{
+  --bg:#f5f6f8; --surface:#ffffff; --ink:#1b2430; --muted:#5d6878; --line:#dde1e7;
+  --accent:#1f4e79; --accent-soft:#e6eef6; --seal:#c0392b; --seal-soft:#fbeceb;
+  --ok:#2e7d4f; --ok-soft:#e7f3ec; --warn:#a86500; --warn-soft:#fdf3e1;
+  --work:#3d78b0; --excl:#e2a33a; --other:#c7ccd4;
+  --font-body:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --font-num:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12161c; --surface:#1a2028; --ink:#e6e9ee; --muted:#9aa4b2; --line:#2c3440;
+  --accent:#7fb2e5; --accent-soft:#1d2b3a; --seal:#ff7b6b; --seal-soft:#3a1f1d;
+  --ok:#6fcf97; --ok-soft:#173026; --warn:#f0b75a; --warn-soft:#352812;
+  --work:#5b98d2; --excl:#d89a34; --other:#3b4452; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12161c; --surface:#1a2028; --ink:#e6e9ee; --muted:#9aa4b2; --line:#2c3440;
+  --accent:#7fb2e5; --accent-soft:#1d2b3a; --seal:#ff7b6b; --seal-soft:#3a1f1d;
+  --ok:#6fcf97; --ok-soft:#173026; --warn:#f0b75a; --warn-soft:#352812;
+  --work:#5b98d2; --excl:#d89a34; --other:#3b4452; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.55}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:16px;padding-block:24px 64px;display:flex;flex-direction:column;gap:20px}
+header h1{font-size:1.6rem;margin:0;letter-spacing:-.01em;text-wrap:balance}
+header p{margin:.25rem 0 0;color:var(--muted);font-size:.9rem}
+.num{font-family:var(--font-num);font-variant-numeric:tabular-nums}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px}
+.label{font-size:.75rem;color:var(--muted);letter-spacing:.04em;font-weight:600}
+.controls{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:flex-end}
+.field{display:flex;flex-direction:column;gap:4px}
+select,input[type=date],input[type=text]{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 10px;min-height:36px}
+button{font:inherit;cursor:pointer;border-radius:6px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:6px 12px;min-height:36px}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--surface);font-weight:600}
+button:focus-visible,select:focus-visible,input:focus-visible,.drop:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;border-radius:0;min-width:64px}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--surface);font-weight:600}
+.drop{border:1.5px dashed var(--line);border-radius:10px;padding:22px;text-align:center;color:var(--muted);background:var(--surface);cursor:pointer}
+.drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
+.drop strong{color:var(--ink)}
+.hint{font-size:.85rem;color:var(--muted)}
+.err{color:var(--seal);font-size:.9rem}
+.tbl-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.88rem}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{font-size:.75rem;color:var(--muted);font-weight:600;letter-spacing:.03em}
+tbody tr.pick{cursor:pointer}
+tbody tr.pick:hover{background:var(--accent-soft)}
+tbody tr.sel{background:var(--accent-soft)}
+.pill{display:inline-block;padding:1px 9px;border-radius:999px;font-size:.78rem;font-weight:600}
+.p-due{background:var(--seal-soft);color:var(--seal)}
+.p-near{background:var(--warn-soft);color:var(--warn)}
+.p-no{background:var(--ok-soft);color:var(--ok)}
+.p-k{background:var(--accent-soft);color:var(--accent);font-weight:500}
+.p-x{background:var(--warn-soft);color:var(--warn);font-weight:500}
+.p-r{background:var(--ok-soft);color:var(--ok);font-weight:500}
+.sectitle{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.sectitle h2{font-size:1.05rem;margin:0}
+.verdict{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center}
+.stamp{width:108px;height:108px;border:3px solid currentColor;border-radius:8px;display:grid;place-items:center;text-align:center;font-weight:700;font-size:1.35rem;line-height:1.15;transform:rotate(-6deg)}
+.stamp small{display:block;font-size:.7rem;font-weight:600;letter-spacing:.05em}
+.stamp.due{color:var(--seal);background:var(--seal-soft)}
+.stamp.no{color:var(--ok);background:var(--ok-soft)}
+.verdict h3{margin:0 0 4px;font-size:1.15rem;text-wrap:balance}
+.verdict p{margin:0;color:var(--muted)}
+.kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px 18px;margin-top:18px}
+.kv div{min-width:0}
+.kv .v{font-size:1.05rem;font-weight:600}
+.calc{margin-top:16px;padding:12px 14px;background:var(--bg);border-radius:8px;font-size:.92rem;overflow-x:auto}
+.timeline{position:relative;height:34px;border-radius:6px;overflow:hidden;background:var(--other);margin-top:8px}
+.timeline span{position:absolute;top:0;bottom:0}
+.axis{position:relative;height:18px;font-size:.7rem;color:var(--muted)}
+.axis span{position:absolute;transform:translateX(-50%)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.8rem;color:var(--muted);margin-top:4px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:4px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.grid2>*{min-width:0}
+.addrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+details summary{cursor:pointer;color:var(--muted);font-size:.9rem}
+.rules{font-size:.86rem;color:var(--muted)}
+.rules ol{margin:.4rem 0 0;padding-left:1.2rem;display:flex;flex-direction:column;gap:4px}
+.badge-ex{font-size:.72rem;color:var(--warn);font-weight:600;margin-left:6px}
+@media (max-width:760px){.grid2{grid-template-columns:1fr}.verdict{grid-template-columns:1fr}.stamp{width:92px;height:92px;font-size:1.15rem}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <header>
+    <h1>시군만기 판정기</h1>
+    <p>2026학년도 경상북도교육청 교육공무원(초등) 인사관리기준 제13조·별표1, 인사관리실무요령 Ⅱ-1-가-5)에 따라 나이스 경력의 실근무기간을 계산합니다. 파일은 이 브라우저 안에서만 읽히고 어디에도 전송되지 않습니다.</p>
+  </header>
+
+  <section class="panel controls" aria-label="판정 조건">
+    <div class="field"><label class="label" for="round">인사 시기</label>
+      <select id="round"></select></div>
+    <div class="field" id="customWrap" hidden><label class="label" for="basisCustom">산정 기준일</label>
+      <input type="date" id="basisCustom"></div>
+    <div class="field"><span class="label">직위</span>
+      <div class="seg" role="group" aria-label="직위">
+        <button type="button" id="roleT" aria-pressed="true">교사</button>
+        <button type="button" id="roleV" aria-pressed="false">교감</button>
+      </div></div>
+    <div class="field"><span class="label">산정 기준일</span><span class="num" id="basisShow" style="min-height:36px;display:flex;align-items:center"></span></div>
+  </section>
+
+  <div class="drop" id="drop" tabindex="0" role="button" aria-label="나이스 경력 엑셀 파일 올리기">
+    <strong>나이스 인사기록 &gt; 경력 엑셀 파일을 끌어다 놓거나 눌러서 고르세요</strong><br>
+    <span class="hint">여러 명의 파일을 한 번에 올릴 수 있습니다 (.xlsx · .xls · .csv). 파일 이름이 성명 칸에 들어갑니다.</span>
+    <input type="file" id="file" accept=".xlsx,.xls,.csv" multiple hidden>
+  </div>
+  <div class="err" id="err" hidden></div>
+
+  <section class="panel" aria-label="대상자 요약">
+    <div class="sectitle"><h2>대상자 요약</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" id="copyBtn">표 복사 (엑셀 붙여넣기용)</button><button type="button" id="clearBtn">목록 비우기</button></div></div>
+    <div class="tbl-wrap"><table id="sumTbl"><thead><tr>
+      <th>성명(파일)</th><th>현임 시·군</th><th>구역</th><th>상한</th><th>현임 시·군 전입일</th><th>실근무기간</th><th>판정</th><th>만기 도달일</th><th>만기 적용 인사</th>
+    </tr></thead><tbody></tbody></table></div>
+    <p class="hint" id="copyMsg" style="margin:.5rem 0 0" hidden></p>
+  </section>
+
+  <section id="detail" hidden></section>
+
+  <section class="panel rules">
+    <div class="sectitle"><h2 style="color:var(--ink)">계산 규칙</h2></div>
+    <ol>
+      <li><b>근무상한기간</b>(기준 제13조①, 교사): 1구역 경산·칠곡 8년 / 2구역 구미·영천·청도·고령·성주 10년 / 3구역 포항·경주·김천·안동·영주·상주·문경 15년 / 4구역 의성·청송·영양·영덕·예천·봉화·울진 20년 / 울릉 3년. 교감은 1~3구역 6년, 4구역 7년, 울릉 3년.</li>
+      <li><b>기산일</b>: 현임 시·군으로 처음 발령된 날. 같은 시·군 안의 관내 전보는 통산합니다.</li>
+      <li><b>제외 기간</b>: 실제로 근무하지 않은 휴직(육아·질병 등 모두)·파견(해외, 교원대, 교육기관 등)·직위해제·정직 기간을 빼고 앞뒤 기간을 통산합니다(실무요령 Ⅱ-1-가-5)-라), 별표1 2-나-1)). 나이스의 '휴직연장' 행도 제외에 포함하고, 종료일이 없으면 다음 발령 전날까지로 봅니다.</li>
+      <li><b>기간 계산</b>: 구간마다 시작일부터 종료일까지(양끝 포함) 년·월·일로 세고 합산하며, 30일은 1개월로 올립니다.</li>
+      <li><b>판정</b>: 산정 기준일(정기인사 전날, 2월 말 또는 8월 말) 현재 실근무기간이 상한 이상이면 만기입니다. 교사는 3.1자 정기전보를, 교감은 3.1자·9.1자를 적용 인사로 봅니다.</li>
+      <li><b>직접 확인할 것</b>: 교육(지원)청 근무 영양교사, 학교 근무 임기제 교육연구사(늘봄지원실장) 기간(별표1 2-나-4)·5))은 나이스 행만으로 알 수 없으니 상세 화면의 '제외 기간 추가'로 넣어 주세요. 전보유예(제20조), 도서벽지 특례, 초빙교사 기간은 판정에 반영하지 않습니다.</li>
+    </ol>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+// ===== 시군만기 계산 엔진 (브라우저/Node 공용) =====
+(function (root) {
+  const SIGUN = {
+    '경산': 1, '칠곡': 1,
+    '구미': 2, '영천': 2, '청도': 2, '고령': 2, '성주': 2,
+    '포항': 3, '경주': 3, '김천': 3, '안동': 3, '영주': 3, '상주': 3, '문경': 3,
+    '의성': 4, '청송': 4, '영양': 4, '영덕': 4, '예천': 4, '봉화': 4, '울진': 4,
+    '울릉': 5
+  };
+  // 기준 제13조 ① 근속근무상한기간(년). 5 = 울릉군
+  const LIMIT = {
+    teacher: { 1: 8, 2: 10, 3: 15, 4: 20, 5: 3 },
+    vp:      { 1: 6, 2: 6, 3: 6, 4: 7, 5: 3 }
+  };
+  const SCHOOL_LIMIT = { teacher: 5, vp: 4 };
+  const ZONE_NAME = { 1: '1구역', 2: '2구역', 3: '3구역', 4: '4구역', 5: '4구역(울릉)' };
+
+  // ---- 날짜: UTC 일수 정수로 처리 ----
+  const D = (y, m, d) => Math.round(Date.UTC(y, m - 1, d) / 864e5);
+  const parts = n => { const t = new Date(n * 864e5); return [t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate()]; };
+  const fmt = n => { if (n == null) return ''; const [y, m, d] = parts(n); return `${y}.${String(m).padStart(2, '0')}.${String(d).padStart(2, '0')}`; };
+  const parseDate = s => {
+    if (s == null) return null;
+    if (typeof s === 'number') { // 엑셀 일련번호
+      return Math.round(s - 25569);
+    }
+    const m = String(s).match(/(\d{4})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})/);
+    return m ? D(+m[1], +m[2], +m[3]) : null;
+  };
+  const dim = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+
+  // a~b(양끝 포함) 기간을 {m, d} 로. 월 단위 우선, 남는 날은 일수.
+  function span(a, b) {
+    if (b < a) return { m: 0, d: 0 };
+    const [ay, am, ad] = parts(a);
+    const [by, bm, bd] = parts(b + 1); // 종료일 다음날
+    let months = (by - ay) * 12 + (bm - am);
+    let days = bd - ad;
+    if (days < 0) {
+      months -= 1;
+      const pm = bm - 1 === 0 ? 12 : bm - 1, py = bm - 1 === 0 ? by - 1 : by;
+      days += dim(py, pm);
+    }
+    return { m: months, d: days };
+  }
+  function addSpan(t, s) {
+    let m = t.m + s.m, d = t.d + s.d;
+    m += Math.floor(d / 30); d = d % 30;
+    return { m, d };
+  }
+  const ymdText = s => `${Math.floor(s.m / 12)}년 ${s.m % 12}개월 ${s.d}일`;
+
+  // ---- 임용구분 분류 ----
+  function classify(type) {
+    const t = (type || '').replace(/\s/g, '');
+    if (/복직|복귀|해제됨|파견종료|파견해제/.test(t)) return 'return';
+    if (/직위해제/.test(t)) return 'suspend';
+    if (/정직/.test(t)) return 'suspend';
+    if (/휴직/.test(t)) return 'leave';
+    if (/파견/.test(t)) return 'dispatch';
+    return 'place';
+  }
+  function sigunOf(dept) {
+    const t = (dept || '').replace(/\s/g, '');
+    const m = t.match(/경상북도([가-힣]{2})교육지원청/);
+    if (m && SIGUN[m[1]]) return m[1];
+    const m2 = t.match(/([가-힣]{2})(시|군)교육지원청/);
+    if (m2 && SIGUN[m2[1]]) return m2[1];
+    return null;
+  }
+  function schoolOf(dept) {
+    const toks = (dept || '').trim().split(/\s+/);
+    for (let i = toks.length - 1; i >= 0; i--) if (/(학교|유치원)$/.test(toks[i])) return toks[i];
+    return null;
+  }
+
+  // ---- 엑셀 행 배열 → 레코드 ----
+  function rowsToRecords(rows) {
+    const norm = v => String(v == null ? '' : v).replace(/\s/g, '');
+    let hi = -1, col = {};
+    for (let i = 0; i < Math.min(rows.length, 30); i++) {
+      const r = rows[i] || [];
+      const idx = k => r.findIndex(c => norm(c) === k || norm(c).startsWith(k));
+      if (idx('기간') >= 0 && idx('임용구분') >= 0) {
+        hi = i;
+        col = { period: idx('기간'), type: idx('임용구분'), pos: idx('직급'), dept: idx('부서'), issuer: idx('발령청') };
+        break;
+      }
+    }
+    if (hi < 0) throw new Error('나이스 경력 양식의 머리글(기간, 임용구분, 부서)을 찾지 못했습니다.');
+    const out = [];
+    for (let i = hi + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const p = String(r[col.period] == null ? '' : r[col.period]);
+      const ds = p.match(/\d{4}\s*[.\-\/]\s*\d{1,2}\s*[.\-\/]\s*\d{1,2}/g) || [];
+      const start = parseDate(ds[0]);
+      if (start == null) continue;
+      const end = ds[1] ? parseDate(ds[1]) : null;
+      const type = String(r[col.type] || '').trim();
+      const dept = col.dept >= 0 ? String(r[col.dept] || '').trim() : '';
+      out.push({
+        idx: out.length, start, end, type, dept,
+        pos: col.pos >= 0 ? String(r[col.pos] || '').trim() : '',
+        issuer: col.issuer >= 0 ? String(r[col.issuer] || '').trim() : '',
+        kind: classify(type), sigun: sigunOf(dept), school: schoolOf(dept)
+      });
+    }
+    if (!out.length) throw new Error('경력 행을 읽지 못했습니다. 기간 칸이 "2024.03.01 ~" 형식인지 확인해 주세요.');
+    // 오래된 순 정렬 (같은 날이면 원래 순서의 역순 = 나이스는 최신이 위)
+    out.forEach((r, i) => r.ord = i);
+    out.sort((a, b) => a.start - b.start || b.ord - a.ord);
+    return out;
+  }
+
+  // ---- 제외기간 후보 ----
+  function exclusionCandidates(recs, basis) {
+    const ex = [];
+    recs.forEach((r, i) => {
+      if (!['leave', 'dispatch', 'suspend'].includes(r.kind)) return;
+      let end = r.end, inferred = false;
+      if (end == null) {
+        const nxt = recs.slice(i + 1).find(n => n.start > r.start);
+        end = nxt ? nxt.start - 1 : basis; inferred = true;
+      }
+      ex.push({ id: 'r' + r.idx, start: r.start, end, inferred, type: r.type, kind: r.kind, on: true, src: 'neis' });
+    });
+    return ex;
+  }
+  function merge(intervals) {
+    const s = intervals.filter(x => x.end >= x.start).map(x => [x.start, x.end]).sort((a, b) => a[0] - b[0]);
+    const out = [];
+    for (const [a, b] of s) {
+      if (out.length && a <= out[out.length - 1][1] + 1) out[out.length - 1][1] = Math.max(out[out.length - 1][1], b);
+      else out.push([a, b]);
+    }
+    return out;
+  }
+  // [from, to] 에서 제외구간을 뺀 근무 구간들
+  function workSegments(from, to, exMerged) {
+    const segs = []; let cur = from;
+    for (const [a, b] of exMerged) {
+      if (b < cur || a > to) continue;
+      if (a > cur) segs.push([cur, Math.min(a - 1, to)]);
+      cur = Math.max(cur, b + 1);
+      if (cur > to) break;
+    }
+    if (cur <= to) segs.push([cur, to]);
+    return segs;
+  }
+  const sumSegs = segs => segs.reduce((t, [a, b]) => addSpan(t, span(a, b)), { m: 0, d: 0 });
+  const geYears = (s, y) => s.m >= y * 12;
+
+  // 현재 소속의 연속 근무 시작일 (key: 'sigun' | 'school')
+  function currentRun(recs, key) {
+    const ev = recs.filter(r => r.kind === 'place' && r[key]);
+    if (!ev.length) return null;
+    const cur = ev[ev.length - 1][key];
+    let k = ev.length - 1;
+    while (k > 0 && ev[k - 1][key] === cur) k--;
+    return { value: cur, start: ev[k].start, prev: k > 0 ? ev[k - 1][key] : null };
+  }
+
+  // 만기 도달일(근무기간이 N년이 되는 날) — 이분 탐색
+  function reachDate(from, years, exMerged) {
+    const target = years * 12;
+    let lo = from, hi = from + 366 * (years + 40);
+    if (sumSegs(workSegments(from, hi, exMerged)).m < target) return null;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (sumSegs(workSegments(from, mid, exMerged)).m >= target) hi = mid; else lo = mid + 1;
+    }
+    return lo;
+  }
+  // 도달일 이후 첫 정기인사 (기준일 = 2월말/8월말)
+  function nextRound(reach, withSept) {
+    if (reach == null) return null;
+    let [y] = parts(reach);
+    for (let yy = y; yy < y + 3; yy++) {
+      const cands = [[D(yy, 3, 1), D(yy, 3, 1) - 1]];
+      if (withSept) cands.push([D(yy, 9, 1), D(yy, 9, 1) - 1]);
+      for (const [rd, bd] of cands) if (bd >= reach) return { round: rd, basis: bd };
+    }
+    return null;
+  }
+
+  function analyze(recs, opt) {
+    const role = opt.role || 'teacher';
+    const basis = opt.basis;
+    const ex = opt.exclusions || exclusionCandidates(recs, basis);
+    const exMerged = merge(ex.filter(e => e.on));
+    const run = currentRun(recs, 'sigun');
+    const res = { role, basis, exclusions: ex, run };
+    if (!run) { res.error = '부서명에서 경상북도 시·군 교육지원청을 찾지 못했습니다.'; return res; }
+    const sigun = opt.sigunOverride || run.value;
+    const zone = SIGUN[sigun];
+    const limit = opt.limitOverride || LIMIT[role][zone];
+    const from = opt.startOverride || run.start;
+    const gross = span(from, basis);
+    const segs = workSegments(from, basis, exMerged);
+    const worked = sumSegs(segs);
+    const exInWindow = merge(ex.filter(e => e.on).map(e => ({ start: Math.max(e.start, from), end: Math.min(e.end, basis) })));
+    const exSum = sumSegs(exInWindow);
+    const reach = reachDate(from, limit, exMerged);
+    const due = geYears(worked, limit);
+    const remainM = Math.max(0, limit * 12 - worked.m - (worked.d > 0 ? 1 : 0));
+    const remainD = worked.d > 0 && !due ? 30 - worked.d : 0;
+    // 현임교
+    const srun = currentRun(recs, 'school');
+    let school = null;
+    if (srun) {
+      const sl = SCHOOL_LIMIT[role];
+      const ssegs = workSegments(srun.start, basis, exMerged);
+      const sw = sumSegs(ssegs);
+      school = { name: srun.value, start: srun.start, worked: sw, limit: sl, due: geYears(sw, sl), reach: reachDate(srun.start, sl, exMerged) };
+    }
+    Object.assign(res, {
+      sigun, zone, zoneName: ZONE_NAME[zone], limit, from, gross, worked, exSum, segs, exInWindow,
+      due, reach, round: nextRound(reach, role === 'vp'),
+      remain: due ? null : { m: remainM, d: remainD }, school
+    });
+    return res;
+  }
+
+  const api = { SIGUN, LIMIT, ZONE_NAME, D, fmt, parseDate, parts, span, addSpan, ymdText, classify, sigunOf, schoolOf,
+    rowsToRecords, exclusionCandidates, merge, workSegments, sumSegs, analyze, reachDate, nextRound };
+  if (typeof module !== 'undefined') module.exports = api; else root.MK = api;
+})(this);
+
+</script>
+<script>
+(function(){
+const $=s=>document.querySelector(s);
+const {D,fmt,parts,ymdText}=MK;
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const state={role:'teacher',people:[],sel:0,basis:null};
+
+// 인사 시기 목록: 오늘 이후 정기인사 4회 + 직접 입력
+(function initRounds(){
+  const now=new Date(); const today=D(now.getFullYear(),now.getMonth()+1,now.getDate());
+  const opts=[]; let y=now.getFullYear()-1;
+  while(opts.length<5){ for(const m of [3,9]){ const r=D(y,m,1); if(r>today-200&&opts.length<5) opts.push(r);} y++; }
+  const sel=$('#round');
+  let def=null;
+  opts.forEach(r=>{const [yy,mm]=parts(r); const o=document.createElement('option'); o.value=r; o.textContent=`${yy}.${mm}.1자 정기인사`; sel.appendChild(o); if(def==null&&r>today&&mm===3) def=r;});
+  const c=document.createElement('option'); c.value='custom'; c.textContent='기준일 직접 입력'; sel.appendChild(c);
+  sel.value=String(def);
+})();
+function readBasis(){
+  const v=$('#round').value;
+  $('#customWrap').hidden = v!=='custom';
+  if(v==='custom'){ const d=MK.parseDate($('#basisCustom').value); return d==null?state.basis:d; }
+  return (+v)-1;
+}
+function refreshBasis(){ state.basis=readBasis(); if(!$('#basisCustom').value){const [y,m,d]=parts(state.basis); $('#basisCustom').value=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;} $('#basisShow').textContent=fmt(state.basis); }
+
+function compute(p){
+  const ex = p.exclusions.map(e=>{ if(e.src==='neis'&&e.inferredOpen){ const nx=p.recs.find(r=>r.start>e.start&&r.kind!=='leave'); return {...e,end: nx? nx.start-1 : state.basis}; } return e; });
+  p.res = MK.analyze(p.recs,{role:state.role,basis:state.basis,exclusions:ex,startOverride:p.startOverride||null,sigunOverride:p.sigunOverride||null});
+}
+function addPerson(name,rows){
+  const recs=MK.rowsToRecords(rows);
+  const exclusions=MK.exclusionCandidates(recs,D(2100,1,1)).map(e=>({...e,inferredOpen:e.inferred}));
+  const p={name,recs,exclusions,startOverride:null,sigunOverride:null};
+  state.people.push(p);
+}
+function status(r){
+  if(r.error) return {cls:'p-near',t:'확인 필요'};
+  if(r.due){ const near=(r.worked.m-r.limit*12)<1; return {cls:'p-due',t: near?'만기(경계)':'만기'}; }
+  if(r.remain && r.remain.m<12) return {cls:'p-near',t:'1년 내 만기'};
+  return {cls:'p-no',t:'만기 아님'};
+}
+const roundText=r=>r.round? `${fmt(r.round.round).slice(0,7).replace('.0','.')}.1자`:'-';
+
+function renderSummary(){
+  const tb=$('#sumTbl tbody'); tb.innerHTML='';
+  state.people.forEach((p,i)=>{ compute(p); const r=p.res; const st=status(r);
+    const tr=document.createElement('tr'); tr.className='pick'+(i===state.sel?' sel':''); tr.tabIndex=0;
+    tr.innerHTML = r.error? `<td>${esc(p.name)}</td><td colspan="8" class="err">${esc(r.error)}</td>` :
+      `<td>${esc(p.name)}${p.example?'<span class="badge-ex">예시</span>':''}</td><td>${r.sigun}</td><td>${r.zoneName}</td><td class="num">${r.limit}년</td><td class="num">${fmt(r.from)}</td><td class="num">${ymdText(r.worked)}</td><td><span class="pill ${st.cls}">${st.t}</span></td><td class="num">${fmt(r.reach)||'-'}</td><td class="num">${roundText(r)}</td>`;
+    tr.onclick=()=>{state.sel=i;render();};
+    tr.onkeydown=e=>{if(e.key==='Enter'){state.sel=i;render();}};
+    tb.appendChild(tr);
+  });
+  if(!state.people.length) tb.innerHTML='<tr><td colspan="9" class="hint">아직 올린 파일이 없습니다.</td></tr>';
+}
+
+function timelineHTML(r,p){
+  const a=r.from, b=r.basis, L=b-a+1; if(L<=0) return '';
+  const pct=x=>((x-a)/L*100).toFixed(3);
+  let h='';
+  r.segs.forEach(([s,e])=>h+=`<span style="left:${pct(s)}%;width:${((e-s+1)/L*100).toFixed(3)}%;background:var(--work)" title="근무 ${fmt(s)}~${fmt(e)}"></span>`);
+  r.exInWindow.forEach(([s,e])=>h+=`<span style="left:${pct(s)}%;width:${((e-s+1)/L*100).toFixed(3)}%;background:var(--excl)" title="제외 ${fmt(s)}~${fmt(e)}"></span>`);
+  if(r.reach && r.reach<=b) h+=`<span style="left:${pct(r.reach)}%;width:2px;background:var(--seal)" title="만기 도달 ${fmt(r.reach)}"></span>`;
+  const [y0]=parts(a),[y1]=parts(b); const step=Math.max(1,Math.ceil((y1-y0)/8)); let ax='';
+  for(let y=y0+1;y<=y1;y+=step){const t=D(y,3,1); if(t>a&&t<b) ax+=`<span style="left:${pct(t)}%">${y}</span>`;}
+  return `<div class="timeline" role="img" aria-label="현임 시군 근무 타임라인">${h}</div><div class="axis">${ax}</div>
+  <div class="legend"><span><i style="background:var(--work)"></i>근무 인정</span><span><i style="background:var(--excl)"></i>제외(휴직·파견 등)</span><span><i style="background:var(--seal)"></i>만기 도달일</span></div>`;
+}
+
+function renderDetail(){
+  const el=$('#detail'); const p=state.people[state.sel];
+  if(!p){el.hidden=true;return;} el.hidden=false; const r=p.res;
+  if(r.error){el.innerHTML=`<div class="panel"><p class="err">${esc(r.error)}</p></div>`;return;}
+  const st=status(r);
+  const head = r.due
+    ? `<div class="stamp due"><div>만기<small>${roundText(r)}</small></div></div>`
+    : `<div class="stamp no"><div>미도래<small>${r.remain?`${Math.floor(r.remain.m/12)}년 ${r.remain.m%12}월 남음`:''}</small></div></div>`;
+  const msg = r.due
+    ? `${fmt(r.basis)} 기준 ${r.sigun} 실근무 ${ymdText(r.worked)}로 ${r.zoneName} 상한 ${r.limit}년을 채웠습니다. ${fmt(r.reach)}에 만기에 도달했고, ${roundText(r)} 인사에서 타 시·군 전보(만기) 대상입니다.`
+    : `${fmt(r.basis)} 기준 실근무 ${ymdText(r.worked)}로 상한 ${r.limit}년까지 ${ymdText(r.remain)}이 남았습니다.${r.reach?` 이후 휴직 없이 근무하면 ${fmt(r.reach)}에 만기에 도달하여 ${roundText(r)} 인사 대상이 됩니다.`:''}`;
+  const near = r.due && (r.worked.m - r.limit*12) < 1 ? `<p class="err" style="margin-top:6px">상한을 1개월 안쪽으로 넘겼습니다. 휴직 시작·복직일이 하루만 달라도 결과가 바뀌니 나이스 발령일자를 다시 확인하세요.</p>`:'';
+  const sigunOpts=Object.keys(MK.SIGUN).map(s=>`<option ${s===r.sigun?'selected':''}>${s}</option>`).join('');
+  const toISO=n=>{const [y,m,d]=parts(n);return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;};
+  const exRows=p.exclusions.map((e,i)=>{ const ce=(r.exclusions[i]||e);
+    return `<tr><td><input type="checkbox" id="ex${i}" data-i="${i}" ${e.on?'checked':''} aria-label="제외 적용"></td><td class="num">${fmt(ce.start)}</td><td class="num">${fmt(ce.end)}${e.inferredOpen?' <span class="hint">(추정)</span>':''}</td><td>${esc(e.type)}</td><td class="num">${ymdText(MK.span(ce.start,ce.end))}</td><td>${e.src==='manual'?`<button type="button" data-del="${i}">삭제</button>`:''}</td></tr>`;}).join('') || '<tr><td colspan="6" class="hint">제외할 기간이 없습니다.</td></tr>';
+  const kindTag={place:'<span class="pill p-k">발령</span>',leave:'<span class="pill p-x">휴직</span>',dispatch:'<span class="pill p-x">파견</span>',suspend:'<span class="pill p-x">직위해제·정직</span>',return:'<span class="pill p-r">복직</span>'};
+  const recRows=[...p.recs].reverse().map(x=>`<tr><td class="num">${fmt(x.start)} ~ ${fmt(x.end)}</td><td>${kindTag[x.kind]}</td><td>${esc(x.type)}</td><td>${esc(x.dept)}</td><td>${x.sigun||'<span class="hint">-</span>'}</td></tr>`).join('');
+  const sc=r.school;
+  el.innerHTML=`
+  <div class="panel">
+    <div class="sectitle"><h2>${esc(p.name)}</h2><span class="pill ${st.cls}">${st.t}</span></div>
+    <div class="verdict">${head}<div><h3>${r.sigun} · ${r.zoneName} · 상한 ${r.limit}년</h3><p>${msg}</p>${near}</div></div>
+    <div class="kv">
+      <div><div class="label">현임 시·군 전입일</div><div class="v num">${fmt(r.from)}</div></div>
+      <div><div class="label">재직 기간(전입~기준일)</div><div class="v num">${ymdText(r.gross)}</div></div>
+      <div><div class="label">제외 기간 합계</div><div class="v num">${ymdText(r.exSum)}</div></div>
+      <div><div class="label">실근무기간</div><div class="v num" style="color:var(--accent)">${ymdText(r.worked)}</div></div>
+      <div><div class="label">만기 도달일</div><div class="v num">${fmt(r.reach)||'-'}</div></div>
+      <div><div class="label">만기 적용 인사</div><div class="v num">${roundText(r)}</div></div>
+    </div>
+    <div class="calc num">근무 인정 구간: ${r.segs.map(([a,b])=>`${fmt(a)}~${fmt(b)} (${ymdText(MK.span(a,b))})`).join(' + ')} = <b>${ymdText(r.worked)}</b></div>
+    <div style="margin-top:16px"><div class="label">현임 시·군 근무 타임라인 (${fmt(r.from)} ~ ${fmt(r.basis)})</div>${timelineHTML(r,p)}</div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <div class="sectitle"><h2>제외 기간</h2><span class="hint">체크를 풀면 근무로 인정합니다</span></div>
+      <div class="tbl-wrap"><table><thead><tr><th></th><th>시작</th><th>종료</th><th>사유</th><th>기간</th><th></th></tr></thead><tbody id="exBody">${exRows}</tbody></table></div>
+      <div class="addrow"><input type="date" id="addS" aria-label="추가 시작일"><span>~</span><input type="date" id="addE" aria-label="추가 종료일"><input type="text" id="addT" placeholder="사유 (예: 교육청 근무)" aria-label="추가 사유" style="flex:1;min-width:140px"><button type="button" class="primary" id="addBtn">제외 기간 추가</button></div>
+    </div>
+    <div class="panel">
+      <div class="sectitle"><h2>보정</h2></div>
+      <div class="controls">
+        <div class="field"><label class="label" for="ovS">현임 시·군 전입일</label><input type="date" id="ovS" value="${toISO(r.from)}"></div>
+        <div class="field"><label class="label" for="ovG">현임 시·군</label><select id="ovG">${sigunOpts}</select></div>
+        <button type="button" id="ovReset">자동값으로</button>
+      </div>
+      <p class="hint" style="margin:.8rem 0 0">국립학교·타 시도 전입, 인사구역이 바뀐 학교처럼 나이스 행만으로 기산일이 맞지 않을 때 고칩니다.</p>
+      ${sc?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="label">참고: 현임교 근무 (동일교 상한 ${sc.limit}년, 기준 제14조①)</div>
+      <div class="num" style="margin-top:4px">${esc(sc.name)} · ${fmt(sc.start)}부터 · 실근무 ${ymdText(sc.worked)} · ${sc.due?'<span class="pill p-due">학교 만기</span>':`학교 만기 도달 ${fmt(sc.reach)||'-'}`}</div></div>`:''}
+    </div>
+  </div>
+
+  <div class="panel"><details><summary>나이스 원본 경력 ${p.recs.length}행 보기 (분류 결과 포함)</summary>
+    <div class="tbl-wrap" style="margin-top:10px"><table><thead><tr><th>기간</th><th>분류</th><th>임용구분</th><th>부서</th><th>시·군</th></tr></thead><tbody>${recRows}</tbody></table></div></details></div>`;
+
+  el.querySelectorAll('#exBody input[type=checkbox]').forEach(cb=>cb.onchange=()=>{p.exclusions[+cb.dataset.i].on=cb.checked;render();});
+  el.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{p.exclusions.splice(+b.dataset.del,1);render();});
+  $('#addBtn').onclick=()=>{const s=MK.parseDate($('#addS').value),e=MK.parseDate($('#addE').value); if(s==null||e==null||e<s){$('#addS').focus();return;}
+    p.exclusions.push({id:'m'+Date.now(),start:s,end:e,type:$('#addT').value||'직접 추가',kind:'manual',on:true,src:'manual'}); render();};
+  $('#ovS').onchange=e=>{p.startOverride=MK.parseDate(e.target.value);render();};
+  $('#ovG').onchange=e=>{p.sigunOverride=e.target.value;render();};
+  $('#ovReset').onclick=()=>{p.startOverride=null;p.sigunOverride=null;render();};
+}
+function render(){ renderSummary(); renderDetail(); }
+
+// 파일 읽기
+function showErr(m){const e=$('#err'); e.hidden=!m; e.textContent=m||'';}
+async function handleFiles(files){
+  const errs=[];
+  if(state.people.length && state.people.every(p=>p.example)) state.people=[];
+  for(const f of files){
+    try{ const buf=await f.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'});
+      let ok=false, lastErr=null;
+      for(const sn of wb.SheetNames){ const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:null,raw:false});
+        try{ addPerson(f.name.replace(/\.(xlsx|xls|csv)$/i,''),rows); ok=true; break;}catch(e){lastErr=e;} }
+      if(!ok) throw lastErr||new Error('읽을 수 있는 시트가 없습니다.');
+    }catch(e){ errs.push(`${f.name}: ${e.message}`); }
+  }
+  state.sel=Math.max(0,state.people.length-1);
+  showErr(errs.join('\n')); render();
+}
+const drop=$('#drop'), fi=$('#file');
+drop.onclick=()=>fi.click(); drop.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fi.click();}};
+fi.onchange=()=>{handleFiles([...fi.files]); fi.value='';};
+['dragenter','dragover'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop',e=>handleFiles([...e.dataTransfer.files]));
+
+$('#round').onchange=()=>{refreshBasis();render();};
+$('#basisCustom').onchange=()=>{refreshBasis();render();};
+$('#roleT').onclick=()=>{state.role='teacher';$('#roleT').setAttribute('aria-pressed','true');$('#roleV').setAttribute('aria-pressed','false');render();};
+$('#roleV').onclick=()=>{state.role='vp';$('#roleV').setAttribute('aria-pressed','true');$('#roleT').setAttribute('aria-pressed','false');render();};
+$('#clearBtn').onclick=()=>{state.people=[];state.sel=0;render();};
+$('#copyBtn').onclick=()=>{
+  const head=['성명','현임시군','구역','상한(년)','전입일','실근무기간','판정','만기도달일','적용인사'];
+  const lines=[head.join('\t')].concat(state.people.map(p=>{const r=p.res; if(r.error) return [p.name,r.error].join('\t'); return [p.name,r.sigun,r.zoneName,r.limit,fmt(r.from),ymdText(r.worked),status(r).t,fmt(r.reach),roundText(r)].join('\t');}));
+  const txt=lines.join('\n'), m=$('#copyMsg');
+  const fallback=()=>{const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');m.textContent='복사했습니다. 엑셀에 붙여넣으세요.';}catch(e){m.textContent='자동 복사가 막혀 있습니다. 표를 드래그해 복사해 주세요.';}ta.remove();m.hidden=false;};
+  try{navigator.clipboard.writeText(txt).then(()=>{m.textContent='복사했습니다. 엑셀에 붙여넣으세요.';m.hidden=false;},fallback);}catch(e){fallback();}
+};
+
+// 예시 (가상의 교사)
+const EX=[['기     간','임용구분','직 급(직위)','부           서','발  령  청'],
+ ['2025.03.01 ~','교육청내(부처내)전보','초등학교교사(교사(초등))','경상북도포항교육지원청 해오름초등학교','경상북도포항교육지원청'],
+ ['2023.09.01 ~ 2023.09.01','휴직복직','초등학교교사(교사(초등))','경상북도포항교육지원청 바닷길초등학교','경상북도포항교육지원청'],
+ ['2023.03.01 ~ 2023.08.31','휴직연장','초등학교교사(교사(초등))','경상북도포항교육지원청 바닷길초등학교','경상북도포항교육지원청'],
+ ['2022.03.01 ~ 2023.02.28','7호:육아휴직(첫째)','초등학교교사(교사(초등))','경상북도포항교육지원청 바닷길초등학교','경상북도포항교육지원청'],
+ ['2020.03.01 ~ 2025.02.28','교육청내(부처내)전보','초등학교교사(교사(초등))','경상북도포항교육지원청 바닷길초등학교','경상북도포항교육지원청'],
+ ['2015.03.01 ~ 2020.02.29','교육청간전보','초등학교교사(교사(초등))','경상북도포항교육지원청 솔빛초등학교','경상북도교육청'],
+ ['2012.03.01 ~ 2015.02.28','일반공채(일반)','초등학교교사(교사(초등))','경상북도영덕교육지원청 갈매기초등학교','경상북도교육청']];
+addPerson('예시 교사(가상)',EX); state.people[0].example=true;
+refreshBasis(); render();
+})();
+</script>
+
+</body>
+</html>
