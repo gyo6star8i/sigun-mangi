@@ -90,6 +90,20 @@ tbody tr.sel{background:var(--accent-soft)}
 details summary{cursor:pointer;color:var(--muted);font-size:.9rem}
 .rules{font-size:.86rem;color:var(--muted)}
 .rules ol{margin:.4rem 0 0;padding-left:1.2rem;display:flex;flex-direction:column;gap:4px}
+/* 확인서(PDF용): 화면 테마와 무관하게 흰 종이·검은 글씨로 고정 */
+.cert-stage{position:fixed;left:-10000px;top:0}
+.cert{width:794px;padding:56px 60px;background:#ffffff;color:#111111;font-family:var(--font-body);font-size:13px;line-height:1.55}
+.cert h1{font-size:22px;text-align:center;letter-spacing:.3em;margin:0 0 6px}
+.cert .sub{text-align:center;color:#444;font-size:12px;margin-bottom:22px}
+.cert h4{font-size:13.5px;margin:18px 0 6px}
+.cert table{width:100%;border-collapse:collapse;font-size:12px}
+.cert th,.cert td{border:1px solid #555;padding:5px 7px;white-space:normal;color:#111}
+.cert th{background:#eef0f3;font-weight:600;text-align:center;color:#111;letter-spacing:0}
+.cert .n{font-family:var(--font-num);text-align:center}
+.cert .res{font-weight:700;color:#b42318}
+.cert .box{border:1px solid #555;padding:10px 12px;margin-top:6px}
+.cert .sign{display:flex;justify-content:flex-end;gap:28px;margin-top:22px;font-size:13.5px}
+.cert .foot{margin-top:18px;font-size:11px;color:#555}
 .badge-ex{font-size:.72rem;color:var(--warn);font-weight:600;margin-left:6px}
 @media (max-width:760px){.grid2{grid-template-columns:1fr}.verdict{grid-template-columns:1fr}.stamp{width:92px;height:92px;font-size:1.15rem}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -138,7 +152,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:.9rem}
 
   <section class="panel" aria-label="대상자 요약">
     <div class="sectitle"><h2>대상자 요약</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" id="copyBtn">표 복사 (엑셀 붙여넣기용)</button><button type="button" id="clearBtn">목록 비우기</button></div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" id="copyBtn">표 복사 (엑셀 붙여넣기용)</button><button type="button" id="pdfAllBtn">만기 대상자 확인서 PDF</button><button type="button" id="clearBtn">목록 비우기</button></div></div>
     <div class="tbl-wrap"><table id="sumTbl"><thead><tr>
       <th>성명(파일)</th><th>현임 시·군</th><th>구역</th><th>상한</th><th>현임 시·군 전입일</th><th>실근무기간</th><th>판정</th><th>만기 도달일</th><th>만기 적용 인사</th>
     </tr></thead><tbody></tbody></table></div>
@@ -161,6 +175,8 @@ details summary{cursor:pointer;color:var(--muted);font-size:.9rem}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 // ===== 시군만기 계산 엔진 (브라우저/Node 공용) =====
 (function (root) {
@@ -525,7 +541,7 @@ function renderDetail(){
   const sc=r.school;
   el.innerHTML=`
   <div class="panel">
-    <div class="sectitle"><h2>${esc(p.name)}</h2><span class="pill ${st.cls}">${st.t}</span></div>
+    <div class="sectitle"><h2>${esc(p.name)}</h2><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="pill ${st.cls}">${st.t}</span><button type="button" class="primary" id="pdfOneBtn">확인서 PDF 내려받기</button></div></div>
     <div class="verdict">${head}<div><h3>${r.sigun} · ${r.zoneName} · 상한 ${r.limit}년</h3><p>${msg}</p>${near}</div></div>
     <div class="kv">
       <div><div class="label">현임 시·군 전입일</div><div class="v num">${fmt(r.from)}</div></div>
@@ -575,7 +591,69 @@ function renderDetail(){
   $('#ovG').onchange=e=>{p.sigunOverride=e.target.value;render();};
   $('#ovReset').onclick=()=>{p.startOverride=null;p.sigunOverride=null;render();};
 }
-function render(){ renderSummary(); renderDetail(); }
+// ===== 확인서 PDF =====
+function certHTML(p){
+  const r=p.res, s=status(r), sc=r.school;
+  const roleName=state.role==='vp'?'교감':'교사';
+  const exOn=r.exclusions.filter(e=>e.on&&e.end>=r.from&&e.start<=r.basis);
+  const ty=new Date().getFullYear();
+  const result = r.due ? `<span class="res">시·군 근무상한기간 만기 (${roundText(r)} 인사 대상)</span>`
+                       : `만기 아님 (상한까지 ${ymdText(r.remain)} 남음${r.reach?`, 만기 도달 예정일 ${fmt(r.reach)}`:''})`;
+  return `<div class="cert">
+  <h1>근무기간 산정 확인서</h1>
+  <div class="sub">시·군 근무상한기간(만기) 확인 · ${roundText(r)} 정기인사 · 산정 기준일 ${fmt(r.basis)}</div>
+  <h4>1. 인적 사항</h4>
+  <table><tr><th style="width:16%">성 명</th><td style="width:34%">${esc(p.name)}</td><th style="width:16%">직 위</th><td>${roleName}</td></tr>
+  <tr><th>현임교</th><td>${esc(sc?sc.name:'')}</td><th>현임 시·군</th><td>${esc(r.sigun)} (${r.zoneName})</td></tr></table>
+  <h4>2. 산정 결과</h4>
+  <table><tr><th style="width:16%">전입일</th><td class="n" style="width:34%">${fmt(r.from)}</td><th style="width:16%">근무상한기간</th><td class="n">${r.limit}년</td></tr>
+  <tr><th>재직 기간</th><td class="n">${ymdText(r.gross)}</td><th>제외 기간</th><td class="n">${ymdText(r.exSum)}</td></tr>
+  <tr><th>실근무기간</th><td class="n" style="font-weight:700">${ymdText(r.worked)}</td><th>만기 도달일</th><td class="n">${fmt(r.reach)||'-'}</td></tr>
+  <tr><th>판 정</th><td colspan="3">${result}</td></tr></table>
+  <h4>3. ${esc(r.sigun)} 안의 학교별 실근무 내역</h4>
+  <table><tr><th>학교</th><th>기간</th><th>재직</th><th>제외</th><th>실근무</th></tr>
+  ${(r.schools||[]).map(x=>`<tr><td>${esc(x.name)}</td><td class="n">${fmt(x.start)} ~ ${fmt(x.end)}</td><td class="n">${ymdText(x.gross)}</td><td class="n">${x.exSum.m||x.exSum.d?ymdText(x.exSum):'-'}</td><td class="n">${ymdText(x.worked)}</td></tr>`).join('')}
+  <tr><th>합계</th><td class="n">${fmt(r.from)} ~ ${fmt(r.basis)}</td><td class="n">${ymdText(r.gross)}</td><td class="n">${ymdText(r.exSum)}</td><td class="n" style="font-weight:700">${ymdText(r.worked)}</td></tr></table>
+  <h4>4. 근무기간에서 제외한 기간</h4>
+  <table><tr><th style="width:8%">번호</th><th>기간</th><th>사유(나이스 임용구분)</th><th style="width:20%">일수 환산</th></tr>
+  ${exOn.length?exOn.map((e,i)=>`<tr><td class="n">${i+1}</td><td class="n">${fmt(e.start)} ~ ${fmt(e.end)}</td><td>${esc(e.type)}${e.src==='manual'?' (직접 추가)':''}</td><td class="n">${ymdText(MK.span(e.start,e.end))}</td></tr>`).join(''):'<tr><td colspan="4" style="text-align:center">없음</td></tr>'}</table>
+  <h4>5. 본인 확인</h4>
+  <div class="box">위 근무기간 산정 내용을 확인하였습니다. 이의가 있는 경우 사유와 증빙자료(인사기록 등)를 붙여 제출합니다.<br><br>
+  □ 이의 없음 &nbsp;&nbsp;&nbsp; □ 이의 있음 &nbsp;(사유: ________________________________________________)</div>
+  <div class="sign"><span>${ty}년 &nbsp;&nbsp;&nbsp;&nbsp;월 &nbsp;&nbsp;&nbsp;&nbsp;일</span><span>확인자 &nbsp; ${esc(p.name)} &nbsp; (서명)</span></div>
+  <div class="foot">산정 근거: 2026학년도 교육공무원(초등) 인사관리기준 제13조①(근속근무상한기간), 별표1 2-나-1) / 인사관리실무요령 Ⅱ-1-가-5)-라)(휴직·파견·직위해제·정직 기간 제외 후 전후 통산). 기간은 구간별 역(曆)에 따라 초일 산입으로 계산하고, 구간 합산 시 30일을 1개월로 환산함. 나이스 경력 자료를 바탕으로 산정한 것으로, 최종 결과는 인사 담당자의 확인을 거쳐 확정됩니다.</div>
+</div>`;
+}
+const canDownload=()=>/github\.io$|^localhost$|^127\.|^$/.test(location.hostname)||location.protocol==='file:';
+async function makePDF(list,filename){
+  const m=$('#copyMsg');
+  if(!canDownload()){ m.textContent='이 화면에서는 파일 내려받기가 막혀 있습니다. 공개 주소 https://gyo6star8i.github.io/sigun-mangi/ 에서 내려받으세요.'; m.hidden=false; m.scrollIntoView({block:'center'}); return; }
+  if(!window.jspdf||!window.html2canvas){ m.textContent='PDF 도구를 불러오지 못했습니다. 인터넷 연결을 확인하고 새로고침해 주세요.'; m.hidden=false; return; }
+  const stage=document.createElement('div'); stage.className='cert-stage'; document.body.appendChild(stage);
+  const pdf=new jspdf.jsPDF({unit:'mm',format:'a4'}); const W=210,H=297;
+  try{
+    await (document.fonts&&document.fonts.ready);
+    for(let i=0;i<list.length;i++){
+      stage.innerHTML=certHTML(list[i]);
+      const cv=await html2canvas(stage.firstElementChild,{scale:2,backgroundColor:'#ffffff'});
+      let w=W, h=cv.height*W/cv.width; if(h>H){ w=W*H/h; h=H; }
+      if(i) pdf.addPage();
+      pdf.addImage(cv.toDataURL('image/jpeg',0.92),'JPEG',(W-w)/2,0,w,h);
+    }
+    pdf.save(filename);
+    m.textContent=`확인서 ${list.length}부를 PDF로 내려받았습니다.`; m.hidden=false;
+  }catch(e){ m.textContent='PDF를 만들지 못했습니다: '+e.message; m.hidden=false; }
+  finally{ stage.remove(); }
+}
+function render(){ renderSummary(); renderDetail();
+  const one=$('#pdfOneBtn'); if(one) one.onclick=()=>{const p=state.people[state.sel]; makePDF([p],`근무기간확인서_${p.name}.pdf`);};
+}
+$('#pdfAllBtn').onclick=()=>{
+  const list=state.people.filter(p=>!p.res.error&&p.res.due);
+  const m=$('#copyMsg');
+  if(!list.length){ m.textContent='만기로 판정된 대상자가 없습니다. 한 명씩 받으려면 상세 화면의 "확인서 PDF 내려받기"를 누르세요.'; m.hidden=false; return; }
+  makePDF(list,`근무기간확인서_만기대상자_${list.length}명.pdf`);
+};
 
 // 파일 읽기
 function showErr(m){const e=$('#err'); e.hidden=!m; e.textContent=m||'';}
