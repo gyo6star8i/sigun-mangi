@@ -397,7 +397,24 @@ details summary{cursor:pointer;color:var(--muted);font-size:.9rem}
       const sw = sumSegs(ssegs);
       school = { name: srun.value, start: srun.start, worked: sw, limit: sl, due: geYears(sw, sl), reach: reachDate(srun.start, sl, exMerged) };
     }
+    // 현임 시·군 안의 학교별 실근무 내역
+    const schools = [];
+    const sev = recs.filter(r => r.kind === 'place' && r.school && r.start <= basis && (r.end == null || r.end >= from));
+    sev.forEach(r => {
+      const last = schools[schools.length - 1];
+      if (last && last.name === r.school) return;
+      if (last) last.end = Math.max(last.start, r.start - 1);
+      schools.push({ name: r.school, start: Math.max(r.start, from), end: basis });
+    });
+    if (schools.length) schools[0].start = from;
+    schools.forEach(s => {
+      s.end = Math.min(s.end, basis);
+      s.gross = span(s.start, s.end);
+      s.worked = sumSegs(workSegments(s.start, s.end, exMerged));
+      s.exSum = sumSegs(merge(ex.filter(e => e.on).map(e => ({ start: Math.max(e.start, s.start), end: Math.min(e.end, s.end) }))));
+    });
     Object.assign(res, {
+      schools,
       sigun, zone, zoneName: ZONE_NAME[zone], limit, from, gross, worked, exSum, segs, exInWindow,
       due, reach, round: nextRound(reach, role === 'vp'),
       remain: due ? null : { m: remainM, d: remainD }, school
@@ -518,6 +535,12 @@ function renderDetail(){
       <div><div class="label">만기 도달일</div><div class="v num">${fmt(r.reach)||'-'}</div></div>
       <div><div class="label">만기 적용 인사</div><div class="v num">${roundText(r)}</div></div>
     </div>
+    ${r.schools&&r.schools.length?`<div style="margin-top:18px"><div class="label">${esc(r.sigun)} 안의 학교별 실근무 (관내 전보는 통산)</div>
+    <div class="tbl-wrap"><table style="margin-top:6px"><thead><tr><th>학교</th><th>기간</th><th>재직</th><th>휴직 등 제외</th><th>실근무</th></tr></thead><tbody>
+    ${r.schools.map((s,k)=>`<tr${k===r.schools.length-1?' style="font-weight:600"':''}><td>${esc(s.name)}${k===r.schools.length-1?' <span class="hint">(현임교)</span>':''}</td><td class="num">${fmt(s.start)} ~ ${fmt(s.end)}</td><td class="num">${ymdText(s.gross)}</td><td class="num">${s.exSum.m||s.exSum.d?ymdText(s.exSum):'-'}</td><td class="num">${ymdText(s.worked)}</td></tr>`).join('')}
+    <tr style="background:var(--accent-soft);font-weight:700"><td>${esc(r.sigun)} 합계</td><td class="num">${fmt(r.from)} ~ ${fmt(r.basis)}</td><td class="num">${ymdText(r.gross)}</td><td class="num">${ymdText(r.exSum)}</td><td class="num" style="color:var(--accent)">${ymdText(r.worked)}</td></tr>
+    </tbody></table></div>
+    <p class="hint" style="margin:.5rem 0 0">시군만기(기준 제13조①)는 위 합계로, 학교만기(동일교 ${r.school?r.school.limit:5}년, 제14조①)는 현임교 한 줄로 판단합니다.</p></div>`:''}
     <div class="calc num">근무 인정 구간: ${r.segs.map(([a,b])=>`${fmt(a)}~${fmt(b)} (${ymdText(MK.span(a,b))})`).join(' + ')} = <b>${ymdText(r.worked)}</b></div>
     <div style="margin-top:16px"><div class="label">현임 시·군 근무 타임라인 (${fmt(r.from)} ~ ${fmt(r.basis)})</div>${timelineHTML(r,p)}</div>
   </div>
