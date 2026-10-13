@@ -122,7 +122,19 @@ details summary{cursor:pointer;color:var(--muted);font-size:.9rem}
     <span class="hint">여러 명의 파일을 한 번에 올릴 수 있습니다 (.xlsx · .xls · .csv). 파일 이름이 성명 칸에 들어갑니다.</span>
     <input type="file" id="file" accept=".xlsx,.xls,.csv" multiple hidden>
   </div>
-  <div class="err" id="err" hidden></div>
+  <div class="err" id="err" hidden style="white-space:pre-line"></div>
+
+  <section class="panel" aria-label="복사해서 붙여넣기">
+    <div class="sectitle"><h2>파일이 암호화돼 있으면 복사해서 붙여넣기</h2><span class="hint">문서보안(DRM)이 걸린 .pia 등 파일용</span></div>
+    <p class="hint" style="margin:0 0 10px">엑셀에서 파일을 열거나 나이스 경력 화면에서 표를 머리글(기간·임용구분…)부터 마지막 행까지 드래그해 복사(Ctrl+C)한 뒤 아래 칸에 붙여넣으세요(Ctrl+V). 머리글 없이 복사해도 됩니다.</p>
+    <div class="controls" style="align-items:flex-start">
+      <div class="field" style="flex:1 1 360px;min-width:0"><label class="label" for="pasteBox">경력 표</label>
+        <textarea id="pasteBox" rows="5" placeholder="2024.03.01 ~	교육청내(부처내)전보	초등학교교사(교사(초등))	경상북도구미교육지원청 구미초등학교	경상북도구미교육지원청" style="font:inherit;font-family:var(--font-num);font-size:.82rem;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%;resize:vertical"></textarea></div>
+      <div class="field" style="flex:0 1 200px"><label class="label" for="pasteName">성명</label>
+        <input type="text" id="pasteName" placeholder="예: 홍길동">
+        <button type="button" class="primary" id="pasteBtn" style="margin-top:8px">붙여넣은 표 판정</button></div>
+    </div>
+  </section>
 
   <section class="panel" aria-label="대상자 요약">
     <div class="sectitle"><h2>대상자 요약</h2>
@@ -239,10 +251,30 @@ details summary{cursor:pointer;color:var(--muted);font-size:.9rem}
         break;
       }
     }
-    if (hi < 0) throw new Error('나이스 경력 양식의 머리글(기간, 임용구분, 부서)을 찾지 못했습니다.');
+    const DATE_RE = /\d{4}\s*[.\-\/]\s*\d{1,2}\s*[.\-\/]\s*\d{1,2}/;
+    let headerless = false;
+    if (hi < 0) {
+      // 머리글 없이 붙여넣은 경우: 날짜 칸 → 기간, 그 뒤 칸 순서대로 임용구분·직급·부서·발령청
+      if (!rows.some(r => (r || []).some(c => DATE_RE.test(String(c == null ? '' : c)))))
+        throw new Error('나이스 경력 양식의 머리글(기간, 임용구분, 부서)이나 "2024.03.01 ~" 같은 기간을 찾지 못했습니다.');
+      headerless = true; hi = -1;
+    }
     const out = [];
     for (let i = hi + 1; i < rows.length; i++) {
-      const r = rows[i] || [];
+      let r = rows[i] || [];
+      if (headerless) {
+        const cells = r.map(c => String(c == null ? '' : c).trim());
+        let pi = cells.findIndex(c => DATE_RE.test(c));
+        if (pi < 0) continue;
+        // "2024.03.01" 과 "~ 2025.02.28" 이 다른 칸으로 나뉜 경우 합치기
+        let period = cells[pi], j = pi + 1;
+        while (j < cells.length && (cells[j] === '' || /^~?\s*\d{4}\s*[.\-\/]\s*\d{1,2}\s*[.\-\/]\s*\d{1,2}$|^~$/.test(cells[j]))) { period += ' ' + cells[j]; j++; }
+        const rest = cells.slice(j).filter(c => c !== '');
+        let di = rest.findIndex((c, k) => k > 0 && /(교육지원청|교육청).*\s.*(학교|유치원|교육지원청|원)$/.test(c));
+        if (di < 0) di = rest.findIndex((c, k) => k > 0 && /(학교|유치원|교육지원청|교육청)/.test(c));
+        r = [period, rest[0] || '', di > 1 ? rest[1] : '', di >= 0 ? rest[di] : '', di >= 0 ? (rest[di + 1] || '') : ''];
+        col = { period: 0, type: 1, pos: 2, dept: 3, issuer: 4 };
+      }
       const p = String(r[col.period] == null ? '' : r[col.period]);
       const ds = p.match(/\d{4}\s*[.\-\/]\s*\d{1,2}\s*[.\-\/]\s*\d{1,2}/g) || [];
       const start = parseDate(ds[0]);
@@ -373,7 +405,13 @@ details summary{cursor:pointer;color:var(--muted);font-size:.9rem}
     return res;
   }
 
-  const api = { SIGUN, LIMIT, ZONE_NAME, D, fmt, parseDate, parts, span, addSpan, ymdText, classify, sigunOf, schoolOf,
+  // 복사·붙여넣기 텍스트 → 행 배열 (탭 우선, 없으면 공백 2칸 이상)
+  function textToRows(text) {
+    return String(text || '').replace(/\r/g, '').split('\n').filter(l => l.trim())
+      .map(l => l.includes('\t') ? l.split('\t') : l.trim().split(/\s{2,}/));
+  }
+
+  const api = { textToRows, SIGUN, LIMIT, ZONE_NAME, D, fmt, parseDate, parts, span, addSpan, ymdText, classify, sigunOf, schoolOf,
     rowsToRecords, exclusionCandidates, merge, workSegments, sumSegs, analyze, reachDate, nextRound };
   if (typeof module !== 'undefined') module.exports = api; else root.MK = api;
 })(this);
@@ -522,7 +560,18 @@ async function handleFiles(files){
   const errs=[];
   if(state.people.length && state.people.every(p=>p.example)) state.people=[];
   for(const f of files){
-    try{ const buf=await f.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'});
+    try{
+      if(!/\.(xlsx|xls|csv)$/i.test(f.name)){
+        const ext=(f.name.match(/\.[^.]+$/)||[''])[0];
+        throw new Error(/\.pia$/i.test(f.name)
+          ? '문서보안(DRM)으로 암호화된 파일(.pia)이라 읽을 수 없습니다. 엑셀에서 열어 표를 복사한 뒤 아래 "복사해서 붙여넣기" 칸을 이용하세요.'
+          : `${ext||'이'} 형식은 읽을 수 없습니다. .xlsx로 저장하거나 표를 복사해 아래 칸에 붙여넣으세요.`);
+      }
+      const buf=await f.arrayBuffer();
+      const head=new Uint8Array(buf.slice(0,8));
+      const isZip=head[0]===0x50&&head[1]===0x4B, isOle=head[0]===0xD0&&head[1]===0xCF;
+      if(/\.(xlsx|xls)$/i.test(f.name)&&!isZip&&!isOle) throw new Error('엑셀 파일이 아니거나 문서보안(DRM)으로 암호화돼 있습니다. 엑셀에서 열어 표를 복사한 뒤 아래 "복사해서 붙여넣기" 칸을 이용하세요.');
+      const wb=XLSX.read(buf,{type:'array'});
       let ok=false, lastErr=null;
       for(const sn of wb.SheetNames){ const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:null,raw:false});
         try{ addPerson(f.name.replace(/\.(xlsx|xls|csv)$/i,''),rows); ok=true; break;}catch(e){lastErr=e;} }
@@ -538,6 +587,14 @@ fi.onchange=()=>{handleFiles([...fi.files]); fi.value='';};
 ['dragenter','dragover'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add('over');}));
 ['dragleave','drop'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove('over');}));
 drop.addEventListener('drop',e=>handleFiles([...e.dataTransfer.files]));
+$('#pasteBtn').onclick=()=>{
+  const txt=$('#pasteBox').value; if(!txt.trim()){showErr('붙여넣은 내용이 없습니다. 엑셀이나 나이스 화면에서 경력 표를 복사해 넣어 주세요.');$('#pasteBox').focus();return;}
+  if(state.people.length && state.people.every(p=>p.example)) state.people=[];
+  try{ addPerson(($('#pasteName').value||'').trim()||`붙여넣기 ${state.people.length+1}`, MK.textToRows(txt));
+    state.sel=state.people.length-1; showErr(''); $('#pasteBox').value=''; $('#pasteName').value=''; render();
+    $('#detail').scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(e){ showErr('붙여넣기: '+e.message); }
+};
 
 $('#round').onchange=()=>{refreshBasis();render();};
 $('#basisCustom').onchange=()=>{refreshBasis();render();};
